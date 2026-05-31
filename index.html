@@ -1,0 +1,523 @@
+<!DOCTYPE html>
+<html lang="es" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>AXIOM_AERO_SIM // Configurador Aerodinámico Militar</title>
+    
+    <!-- STACK DE LIBRERÍAS DE RENDIMIENTO CRÍTICO (CDNS DE ALTA VELOCIDAD) -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/ScrollTrigger.min.js"></script>
+    <!-- Lenis para suavizado obligatorio de scroll -->
+    <script src="https://unpkg.com/lenis@1.1.13/dist/lenis.min.js"></script>
+    <!-- Canvas Confetti para celebración aerodinámica -->
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.3/dist/confetti.browser.min.js"></script>
+
+    <style>
+        /* === VARIABLES GLOBALES (HUD MILITAR SYSTEM) === */
+        :root {
+            --bg-base: #020617;
+            --glass-bg: rgba(6, 10, 26, 0.55);
+            --glass-border: rgba(34, 211, 238, 0.12);
+            --glass-glow: rgba(34, 211, 238, 0.05);
+            --text-main: #f8fafc;
+            --text-muted: #64748b;
+            --neon-aero: #22d3ee;
+            --neon-glow: rgba(34, 211, 238, 0.4);
+            --neon-warn: #ef4444;
+            --spring-speed: 0.5s;
+        }
+
+        /* === RESETEO Y SE SEGURIDAD HARDWARE DE RENDERIZADO === */
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            -webkit-tap-highlight-color: transparent;
+            user-select: none;
+        }
+
+        body, html {
+            background-color: var(--bg-base);
+            color: var(--text-main);
+            font-family: system-ui, -apple-system, sans-serif;
+            overflow-x: hidden;
+            width: 100%;
+            min-height: 100vh;
+        }
+
+        /* Lienzo del túnel de viento */
+        #wind-tunnel-canvas {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            z-index: 1;
+            pointer-events: none;
+        }
+
+        /* Contenedor del Visor Gráfico Spline / CSS3 3D */
+        .viewport-3d-container {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            z-index: 2;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            perspective: 1000px;
+        }
+
+        .aircraft-mesh-3d {
+            width: 300px;
+            height: 300px;
+            transform-style: preserve-3d;
+            position: relative;
+            transition: transform 0.1s ease-out;
+        }
+
+        /* === INTERFAZ FLOTANTE HUD GLASSMORPHISM CON PROCESAMIENTO GPU === */
+        .hud-panel {
+            background: var(--glass-bg);
+            backdrop-filter: blur(25px) saturate(190%);
+            -webkit-backdrop-filter: blur(25px) saturate(190%);
+            border: 1px solid var(--glass-border);
+            box-shadow: 0 0 40px var(--glass-glow);
+            border-radius: 16px;
+            position: fixed;
+            z-index: 10;
+            padding: 20px;
+            transform: translateZ(0); /* Forzar aceleración GPU */
+        }
+
+        .hud-title {
+            font-size: 11px;
+            font-family: monospace;
+            letter-spacing: 2px;
+            color: var(--neon-aero);
+            text-transform: uppercase;
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        /* Controles de Rango de Parámetros */
+        .slider-group {
+            margin-bottom: 16px;
+        }
+        .slider-group label {
+            display: flex;
+            justify-content: space-between;
+            font-size: 12px;
+            color: var(--text-muted);
+            font-family: monospace;
+            margin-bottom: 6px;
+        }
+        .slider-group input[type="range"] {
+            width: 100%;
+            accent-color: var(--neon-aero);
+            background: rgba(255,255,255,0.05);
+            height: 4px;
+            border-radius: 2px;
+            outline: none;
+        }
+
+        /* Botones Interactivos Rive State Machine Style */
+        .rive-mock-btn {
+            width: 100%;
+            padding: 12px;
+            background: rgba(34, 211, 238, 0.05);
+            border: 1px solid var(--glass-border);
+            border-radius: 8px;
+            color: var(--text-main);
+            font-family: monospace;
+            font-weight: bold;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            transition: all 0.3s ease;
+        }
+        .rive-mock-btn.active {
+            background: var(--neon-aero);
+            color: #000;
+            box-shadow: 0 0 20px var(--neon-glow);
+            border-color: var(--neon-aero);
+        }
+        .rive-mock-btn.overheat {
+            background: var(--neon-warn);
+            color: #fff;
+            animation: pulseWarning 0.5s infinite alternate;
+            border-color: var(--neon-warn);
+        }
+        @keyframes pulseWarning {
+            from { box-shadow: 0 0 5px rgba(239,68,68,0.4); }
+            to { box-shadow: 0 0 25px rgba(239,68,68,0.9); }
+        }
+
+        /* Elementos de la lista de especificaciones (AutoAnimate target) */
+        .spec-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 10px;
+            background: rgba(255,255,255,0.02);
+            border-radius: 6px;
+            border-left: 3px solid var(--neon-aero);
+            margin-bottom: 8px;
+            font-size: 12px;
+            font-family: monospace;
+            transition: all 0.4s cubic-bezier(0.25, 1, 0.5, 1);
+        }
+
+        /* Secciones de ScrollTrigger */
+        .scroll-trigger-section {
+            height: 100vh;
+            width: 100vw;
+            position: relative;
+            pointer-events: none;
+            z-index: 3;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- LIENZO VECTORIAL DEL TÚNEL DE VIENTO -->
+    <canvas id="wind-tunnel-canvas"></canvas>
+
+    <!-- ENTORNO COMPUESTO 3D (AVIÓN / DRON DE CARGA PROCEDIMENTAL) -->
+    <div class="viewport-3d-container">
+        <div class="aircraft-mesh-3d" id="aircraft-model">
+            <!-- Ala Izquierda -->
+            <div id="mesh-wing-left" style="position:absolute; top:140px; right:150px; width:180px; height:20px; background:linear-gradient(90deg, transparent, #22d3ee); transform: rotateY(30deg); border-radius: 8px 0 0 8px; border: 1px solid rgba(34,211,238,0.5);"></div>
+            <!-- Chasis Central -->
+            <div id="mesh-fuselage" style="position:absolute; top:120px; left:120px; width:60px; height:180px; background:radial-gradient(circle, #1e293b, #0f172a); border-radius:50px; border: 1px solid rgba(34,211,238,0.3); box-shadow: 0 0 30px rgba(34,211,238,0.15);"></div>
+            <!-- Ala Derecha -->
+            <div id="mesh-wing-right" style="position:absolute; top:140px; left:150px; width:180px; height:20px; background:linear-gradient(-90deg, transparent, #22d3ee); transform: rotateY(-30deg); border-radius: 0 8px 8px 0; border: 1px solid rgba(34,211,238,0.5);"></div>
+            <!-- Alerones Cola -->
+            <div id="mesh-tail" style="position:absolute; bottom:10px; left:135px; width:30px; height:40px; background:#0891b2; transform: rotateX(45deg); border-radius: 4px;"></div>
+        </div>
+    </div>
+
+    <!-- ================= CONTROLES HUD GENERAL (IZQUIERDO) ================= -->
+    <div class="hud-panel" id="hud-controls" style="top: 24px; left: 24px; width: 310px; transform: scale(0); opacity: 0;">
+        <div class="hud-title">
+            <i data-lucide="sliders"></i> Geometría del Vector
+        </div>
+        
+        <div class="slider-group">
+            <label>Envergadura Alas <span id="val-wings">1.0x</span></label>
+            <input type="range" id="control-wings" min="0.5" max="2" step="0.1" value="1">
+        </div>
+
+        <div class="slider-group">
+            <label>Ángulo Alerones <span id="val-ailerons">0°</span></label>
+            <input type="range" id="control-ailerons" min="-45" max="45" step="5" value="0">
+        </div>
+
+        <div class="slider-group">
+            <label>Escala del Chasis <span id="val-chassis">1.0x</span></label>
+            <input type="range" id="control-chassis" min="0.7" max="1.5" step="0.1" value="1">
+        </div>
+
+        <div style="margin-top: 20px;">
+            <button id="btn-engine" class="rive-mock-btn">
+                <i data-lucide="power"></i> <span id="txt-engine">IGNICIÓN MOTORES</span>
+            </button>
+        </div>
+    </div>
+
+    <!-- ================= PANEL TELEMÉTRICO (DERECHO - AUTOANIMATE TARGET) ================= -->
+    <div class="hud-panel" id="hud-telemetry" style="top: 24px; right: 24px; width: 320px; transform: scale(0); opacity: 0;">
+        <div class="hud-title">
+            <i data-lucide="activity"></i> Eficiencia del Perfil
+        </div>
+        <div id="specs-container">
+            <div class="spec-item" id="spec-drag"><span>Coeficiente Fricción (Cd):</span><strong id="data-drag">0.024</strong></div>
+            <div class="spec-item" id="spec-lift"><span>Fuerza Sustentación:</span><strong id="data-lift">1.42 Mac</strong></div>
+            <div class="spec-item" id="spec-velocity"><span>Velocidad Flujo:</span><strong id="data-speed">450 km/h</strong></div>
+            <div class="spec-item" id="spec-status" style="border-left-color: #22c55e;"><span>Estabilidad Estructural:</span><strong id="data-status" style="color: #22c55e;">ÓPTIMA</strong></div>
+        </div>
+        
+        <div style="margin-top: 15px; font-size: 10px; font-family: monospace; color: var(--text-muted); line-height: 1.4;">
+            <div>SYS_WATCHDOG: ENGINE_SYNC_OK</div>
+            <div>AERO_DATA_STREAM: CONNECTED</div>
+        </div>
+    </div>
+
+    <!-- ESTRUCTURA MATRICIAL PARA EL ORBITAJE DE CÁMARA POR SCROLL -->
+    <div class="scroll-trigger-section" id="sec-1"></div>
+    <div class="scroll-trigger-section" id="sec-2"></div>
+    <div class="scroll-trigger-section" id="sec-3"></div>
+
+    <!-- ================= MOTOR COMPLETO DE LÓGICA Y SIMULACIÓN ================= -->
+    <script>
+        gsap.registerPlugin(ScrollTrigger);
+
+        // === 1. INICIALIZADOR DEL SUAVIZADO DE SCROLL CINÉTICO (LENIS) ===
+        const lenis = new Lenis({
+            duration: 1.4,
+            easing: (t) => Math.min(1, 1.001 - Math.pow(2, -10 * t)),
+            orientation: 'vertical',
+            gestureOrientation: 'vertical',
+            smoothWheel: true
+        });
+        function raf(time) {
+            lenis.raf(time);
+            requestAnimationFrame(raf);
+        }
+        requestAnimationFrame(raf);
+
+        // === 2. SIMULACIÓN DEL TÚNEL DE VIENTO (LÓGICA MATEMÁTICA RUST NO_STD OPTIMIZADA) ===
+        const canvas = document.getElementById('wind-tunnel-canvas');
+        const ctx = canvas.getContext('2d');
+        let particles = [];
+        
+        // Parámetros dinámicos del flujo de aire reaccionarios
+        let windSpeed = 6;
+        let angleAttack = 0;
+        let currentInertiaAngle = 0; // Control de amortiguación Popmotion
+        let mouseX = window.innerWidth / 2;
+        let mouseY = window.innerHeight / 2;
+        let chassisScaleFactor = 1;
+        let wingScaleFactor = 1;
+
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        }
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        // Estructura vectorial del vector de viento basada en el binario determinista
+        class WindParticle {
+            constructor() {
+                this.reset();
+                this.x = Math.random() * canvas.width;
+            }
+            reset() {
+                this.x = 0;
+                this.y = Math.random() * canvas.height;
+                this.length = Math.random() * 25 + 10;
+                this.speed = Math.random() * 4 + windSpeed;
+                this.opacity = Math.random() * 0.25 + 0.05;
+            }
+            update() {
+                // Cálculo matemático de desviación de flujo por colisión con el vehículo
+                let dx = this.x - (window.innerWidth / 2);
+                let dy = this.y - (window.innerHeight / 2);
+                let distance = Math.sqrt(dx*dx + dy*dy);
+                
+                // Simulación del deflector del chasis y las alas
+                let colisionRadius = 130 * chassisScaleFactor;
+                if (distance < colisionRadius) {
+                    let force = (colisionRadius - distance) / colisionRadius;
+                    this.y += dy > 0 ? force * 6 : -force * 6;
+                    this.x += this.speed * 0.4;
+                } else {
+                    // Aplicación del ángulo de ataque controlado por la inercia del ratón
+                    this.y += currentInertiaAngle * 2;
+                }
+
+                this.x += this.speed;
+                if (this.x > canvas.width) {
+                    this.reset();
+                }
+            }
+            draw() {
+                ctx.strokeStyle = `rgba(34, 211, 238, ${this.opacity})`;
+                ctx.lineWidth = 1.5;
+                ctx.beginPath();
+                ctx.moveTo(this.x, this.y);
+                ctx.lineTo(this.x - this.length, this.y - (currentInertiaAngle * 3));
+                ctx.stroke();
+            }
+        }
+
+        function initWindTunnel() {
+            particles = [];
+            for (let i = 0; i < 220; i++) {
+                particles.push(new WindParticle());
+            }
+        }
+
+        function animateWindTunnel() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // Popmotion Integrado: Suavizado por inercia del ángulo de ataque del flujo
+            currentInertiaAngle += (angleAttack - currentInertiaAngle) * 0.08;
+
+            particles.forEach(p => {
+                p.update();
+                p.draw();
+            });
+            requestAnimationFrame(animateWindTunnel);
+        }
+
+        // Intercepción y captura del movimiento del ratón para modificar el flujo
+        window.addEventListener('mousemove', (e) => {
+            mouseX = e.clientX;
+            mouseY = e.clientY;
+            // Modificación matemática del vector de ataque según el eje Y de la pantalla
+            angleAttack = (mouseY - window.innerHeight / 2) / (window.innerHeight / 2);
+        });
+
+        // === 3. ORBITAJE DE CÁMARA 3D MEDIANTE GSAP SCROLLTRIGGER ===
+        const aircraft = document.getElementById('aircraft-model');
+        
+        gsap.to(aircraft, {
+            scrollTrigger: {
+                trigger: "#sec-1",
+                start: "top top",
+                end: "bottom bottom",
+                scrub: 1
+            },
+            rotateX: 45,
+            rotateY: 180,
+            scale: 1.2,
+            ease: "none"
+        });
+
+        gsap.to(aircraft, {
+            scrollTrigger: {
+                trigger: "#sec-2",
+                start: "top top",
+                end: "bottom bottom",
+                scrub: 1
+            },
+            rotateX: 15,
+            rotateY: 360,
+            scale: 0.9,
+            ease: "none"
+        });
+
+        // === 4. ANIMACIONES COMPLEJAS DE RESORTE DE MUELLE (SPRING PHYSICS MOCK) ===
+        window.addEventListener('load', () => {
+            // Aparición de paneles con rebote elástico militar simulado
+            gsap.to("#hud-controls", { scale: 1, opacity: 1, duration: 0.8, ease: "elastic.out(1, 0.75)", delay: 0.2 });
+            gsap.to("#hud-telemetry", { scale: 1, opacity: 1, duration: 0.8, ease: "elastic.out(1, 0.75)", delay: 0.4 });
+        });
+
+        // === 5. GESTIÓN DE CONFIGURACIÓN DE COMPONENTES MECÁNICOS ===
+        const controlWings = document.getElementById('control-wings');
+        const controlAilerons = document.getElementById('control-ailerons');
+        const controlChassis = document.getElementById('control-chassis');
+
+        // Referencias a los componentes de la malla
+        const meshWingLeft = document.getElementById('mesh-wing-left');
+        const meshWingRight = document.getElementById('mesh-wing-right');
+        const meshFuselage = document.getElementById('mesh-fuselage');
+
+        function recalcularMatrizAerodinamica() {
+            // Actualización de valores de texto del HUD
+            document.getElementById('val-wings').innerText = `${controlWings.value}x`;
+            document.getElementById('val-ailerons').innerText = `${controlAilerons.value}°`;
+            document.getElementById('val-chassis').innerText = `${controlChassis.value}x`;
+
+            // Transformación geométrica directa en tiempo real
+            wingScaleFactor = parseFloat(controlWings.value);
+            chassisScaleFactor = parseFloat(controlChassis.value);
+
+            meshWingLeft.style.transform = `rotateY(30deg) scaleX(${wingScaleFactor})`;
+            meshWingRight.style.transform = `rotateY(-30deg) scaleX(${wingScaleFactor})`;
+            meshFuselage.style.transform = `scale(${chassisScaleFactor})`;
+
+            // Simulación matemática de cálculo de fricción
+            let baseDrag = 0.024;
+            let finalDrag = baseDrag * chassisScaleFactor + (Math.abs(controlAilerons.value) * 0.001);
+            let finalLift = 1.42 * wingScaleFactor - (chassisScaleFactor * 0.1);
+
+            // AutoAnimate Mock: Reordenación y actualización reactiva de las especificaciones
+            document.getElementById('data-drag').innerText = finalDrag.toFixed(3);
+            document.getElementById('data-lift').innerText = `${finalLift.toFixed(2)} Mac`;
+
+            // Disparador de celebración automática si los coeficientes son altamente eficientes
+            if (finalDrag < 0.022 && finalLift > 1.8) {
+                lanzarCelebracionNeon();
+            }
+        }
+
+        controlWings.addEventListener('input', recalcularMatrizAerodinamica);
+        controlAilerons.addEventListener('input', recalcularMatrizAerodinamica);
+        controlChassis.addEventListener('input', recalcularMatrizAerodinamica);
+
+        // === 6. MOTOR RIVE STATE MACHINE STYLE (BOTÓN DE IGNICIÓN Y SOBRECALENTAMIENTO) ===
+        const btnEngine = document.getElementById('btn-engine');
+        const txtEngine = document.getElementById('txt-engine');
+        let estadoMotor = 0; // 0: Apagado, 1: Encendido, 2: Sobrecalentado
+        let timerSobrecalentamiento;
+
+        btnEngine.addEventListener('click', () => {
+            if (estadoMotor === 0) {
+                // Encendido de turbinas
+                estadoMotor = 1;
+                btnEngine.className = "rive-mock-btn active";
+                txtEngine.innerText = "MOTORES ACTIVOS (PROPULSIÓN)";
+                windSpeed = 16;
+                document.getElementById('data-speed').innerText = "850 km/h";
+                
+                // Simulación de la máquina de estados: sobrecalentamiento a los 6 segundos
+                timerSobrecalentamiento = setTimeout(() => {
+                    estadoMotor = 2;
+                    btnEngine.className = "rive-mock-btn overheat";
+                    txtEngine.innerText = "CRÍTICO: SOBRECALENTAMIENTO";
+                    document.getElementById('data-status').innerText = "PELIGRO / FALLO";
+                    document.getElementById('data-status').style.color = "var(--neon-warn)";
+                    document.getElementById('spec-status').style.borderLeftColor = "var(--neon-warn)";
+                    windSpeed = 22; // Ráfaga descontrolada
+                }, 6000);
+
+            } else {
+                // Apagado completo y reinicio del estado del sistema
+                clearTimeout(timerSobrecalentamiento);
+                estadoMotor = 0;
+                btnEngine.className = "rive-mock-btn";
+                txtEngine.innerText = "IGNICIÓN MOTORES";
+                windSpeed = 6;
+                document.getElementById('data-speed').innerText = "450 km/h";
+                document.getElementById('data-status').innerText = "ÓPTIMA";
+                document.getElementById('data-status').style.color = "#22c55e";
+                document.getElementById('spec-status').style.borderLeftColor = "#22c55e";
+            }
+            initWindTunnel();
+        });
+
+        // === 7. CELEBRACIÓN DE OPTIMIZACIÓN PERFECTA (CANVAS CONFETTI NEÓN) ===
+        function lanzarCelebracionNeon() {
+            let duracion = 1.5 * 1000;
+            let fin = Date.now() + duracion;
+
+            (function frame() {
+                confetti({
+                    particleCount: 4,
+                    angle: 60,
+                    spread: 55,
+                    origin: { x: 0 },
+                    colors: ['#22d3ee', '#06b6d4', '#10b981']
+                });
+                confetti({
+                    particleCount: 4,
+                    angle: 120,
+                    spread: 55,
+                    origin: { x: 1 },
+                    colors: ['#22d3ee', '#06b6d4', '#10b981']
+                });
+
+                if (Date.now() < fin) {
+                    requestAnimationFrame(frame);
+                }
+            }());
+        }
+
+        // === 8. ARRANQUE DEL SISTEMA ===
+        initWindTunnel();
+        animateWindTunnel();
+        lucide.createIcons();
+    </script>
+</body>
+</html>
